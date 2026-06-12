@@ -1,0 +1,6 @@
+.env
+*.log
+original_req.json
+last_req.json
+node_modules/
+.DS_Store

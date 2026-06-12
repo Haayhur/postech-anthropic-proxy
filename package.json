@@ -1,0 +1,13 @@
+{
+  "name": "postech-anthropic-proxy",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node proxy.mjs",
+    "check": "node --check proxy.mjs"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
