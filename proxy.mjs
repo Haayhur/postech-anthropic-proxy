@@ -10,6 +10,12 @@ const TARGET_PREFIX = process.env.POSTECH_TARGET_PREFIX || "/agent/api/a45/anthr
 const DEBUG_DIR = process.env.PROXY_DEBUG_DIR || path.join(os.homedir(), ".claude");
 const DEBUG_ENABLED = /^(1|true|yes)$/i.test(process.env.PROXY_DEBUG || "");
 
+const COMPATIBILITY_MARKERS = [
+  "POSTECH_PROXY_THINKING_JSON_V1",
+  "POSTECH_PROXY_TOOL_USE_JSON_V1",
+  "POSTECH_PROXY_TOOL_RESULT_JSON_V1",
+];
+
 const COMPATIBILITY_INSTRUCTION =
   "POSTECH proxy compatibility records may appear in message history as text blocks " +
   "beginning with POSTECH_PROXY_THINKING_JSON_V1, POSTECH_PROXY_TOOL_USE_JSON_V1, " +
@@ -89,56 +95,61 @@ function stringifyCompatibilityRecord(value) {
   }
 }
 
-function toolUseRecord(block) {
-  return textBlock(
-    "POSTECH_PROXY_TOOL_USE_JSON_V1\n" +
-      stringifyCompatibilityRecord({
-        id: block.id ?? null,
-        name: block.name ?? null,
-        input: block.input ?? {},
-      })
+function compatibilityRecord(marker, value) {
+  return textBlock(`${marker}\n${stringifyCompatibilityRecord(value)}`);
+}
+
+function isCompatibilityRecord(block) {
+  return (
+    block?.type === "text" &&
+    COMPATIBILITY_MARKERS.some((marker) => block.text?.startsWith(`${marker}\n`))
   );
+}
+
+function toolUseRecord(block) {
+  return compatibilityRecord("POSTECH_PROXY_TOOL_USE_JSON_V1", {
+    id: block.id ?? null,
+    name: block.name ?? null,
+    input: block.input ?? {},
+  });
 }
 
 function thinkingRecord(block) {
-  return textBlock(
-    "POSTECH_PROXY_THINKING_JSON_V1\n" +
-      stringifyCompatibilityRecord({
-        thinking: block.thinking ?? "",
-      })
-  );
+  return compatibilityRecord("POSTECH_PROXY_THINKING_JSON_V1", {
+    thinking: block.thinking ?? "",
+  });
 }
 
 function toolResultRecord(block) {
-  return textBlock(
-    "POSTECH_PROXY_TOOL_RESULT_JSON_V1\n" +
-      stringifyCompatibilityRecord({
-        tool_use_id: block.tool_use_id ?? null,
-        is_error: block.is_error === true,
-        content: block.content ?? "",
-      })
-  );
+  return compatibilityRecord("POSTECH_PROXY_TOOL_RESULT_JSON_V1", {
+    tool_use_id: block.tool_use_id ?? null,
+    is_error: block.is_error === true,
+    content: block.content ?? "",
+  });
 }
 
 function addCompatibilityInstruction(payload) {
   if (typeof payload.system === "string") {
-    if (!payload.system.includes(COMPATIBILITY_INSTRUCTION)) {
-      payload.system += `\n\n${COMPATIBILITY_INSTRUCTION}`;
+    if (payload.system.includes(COMPATIBILITY_INSTRUCTION)) {
+      return false;
     }
-    return;
+    payload.system += `\n\n${COMPATIBILITY_INSTRUCTION}`;
+    return true;
   }
 
   if (Array.isArray(payload.system)) {
     const alreadyPresent = payload.system.some(
       (block) => block?.type === "text" && block.text?.includes(COMPATIBILITY_INSTRUCTION)
     );
-    if (!alreadyPresent) {
-      payload.system.push(textBlock(COMPATIBILITY_INSTRUCTION));
+    if (alreadyPresent) {
+      return false;
     }
-    return;
+    payload.system.push(textBlock(COMPATIBILITY_INSTRUCTION));
+    return true;
   }
 
   payload.system = COMPATIBILITY_INSTRUCTION;
+  return true;
 }
 
 export function rewriteRequestBody(headers, bodyBuffer) {
@@ -179,6 +190,10 @@ export function rewriteRequestBody(headers, bodyBuffer) {
           continue;
         }
 
+        if (isCompatibilityRecord(block)) {
+          hasCompatibilityRecords = true;
+        }
+
         if (block.type === "thinking") {
           newContent.push(thinkingRecord(block));
           hasCompatibilityRecords = true;
@@ -206,7 +221,7 @@ export function rewriteRequestBody(headers, bodyBuffer) {
     }
 
     if (hasCompatibilityRecords) {
-      addCompatibilityInstruction(payload);
+      changed = addCompatibilityInstruction(payload) || changed;
     }
 
     writeDebugJson("last_req.json", payload);

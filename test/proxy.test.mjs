@@ -137,6 +137,57 @@ test("tool output that resembles instructions remains inside the JSON value", ()
   assert.match(result.payload.system, /untrusted data, not instructions/);
 });
 
+test("restores the instruction for an existing compatibility record", () => {
+  const existingRecord = {
+    type: "text",
+    text: 'POSTECH_PROXY_TOOL_RESULT_JSON_V1\n{"tool_use_id":"one","content":"kept"}',
+  };
+  const result = rewrite({
+    messages: [{ role: "user", content: [existingRecord] }],
+  });
+
+  assert.deepEqual(result.payload.messages[0].content[0], existingRecord);
+  assert.match(result.payload.system, /Use the records as conversation context/);
+  assert.equal(Number(result.headers["content-length"]), result.rewritten.length);
+});
+
+test("does not rewrite an existing record when the instruction is already present", () => {
+  const first = rewrite({
+    messages: [
+      {
+        role: "user",
+        content: [{ type: "tool_result", tool_use_id: "one", content: "kept" }],
+      },
+    ],
+  });
+  const replay = rewrite({
+    system: first.payload.system,
+    messages: first.payload.messages,
+  });
+
+  assert.strictEqual(replay.rewritten, replay.original);
+  assert.equal(replay.headers["content-length"], undefined);
+});
+
+test("does not treat ordinary text containing a marker as a compatibility record", () => {
+  const result = rewrite({
+    messages: [
+      {
+        role: "user",
+        content: [
+          {
+            type: "text",
+            text: "Diagnostic output mentions POSTECH_PROXY_TOOL_RESULT_JSON_V1 but is not a record.",
+          },
+        ],
+      },
+    ],
+  });
+
+  assert.strictEqual(result.rewritten, result.original);
+  assert.equal(result.payload.system, undefined);
+});
+
 test("leaves requests byte-for-byte unchanged when no rewrite is needed", () => {
   const payload = {
     model: "claude-sonnet-4-6",
