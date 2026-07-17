@@ -5,7 +5,8 @@
   "type": "module",
   "scripts": {
     "start": "node proxy.mjs",
-    "check": "node --check proxy.mjs"
+    "check": "node --check proxy.mjs",
+    "test": "node --test"
   },
   "engines": {
     "node": ">=20"
